@@ -1,0 +1,159 @@
+﻿@page "/"
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Index</PageTitle>
+
+<h1>Wordle on Blazor</h1>
+
+<div class="container align-middle">
+
+	@for (int guessNumber = 0; guessNumber < guesses.Length; guessNumber++)
+	{
+		<div class="d-flex flex-row">
+			@for (int i = 0; i < guesses[guessNumber].Length; i++)
+			{
+				<div class="m-2 text-center d-flex align-items-center game-piece @GetGamePieceClass(guesses[guessNumber][i], i, guessNumber)">
+					<p class="w-100 m-0">@(guesses[guessNumber][i] != '\0' ? guesses[guessNumber][i] : "")</p>
+				</div>
+			}
+		</div>
+	}
+</div>
+
+@code {
+	private int CurrentGuess = 0;
+	private int MaxGuessNo = 6;
+
+	private char[][] guesses = new char[0][];
+	private bool EventHandlersSet = false;
+
+	private string Wordle = "SMASH";
+
+	private List<string> words = new List<string>();
+
+	protected override async Task OnInitializedAsync()
+	{
+		if (!guesses.Any())
+		{
+			guesses = new char[MaxGuessNo][];
+			for (int i = 0; i < MaxGuessNo; i++)
+			{
+				guesses[i] = new char[Wordle.Length];
+			}
+		}
+
+		if (!EventHandlersSet)
+		{
+			objRef = DotNetObjectReference.Create(this);
+			await JS.InvokeAsync<string>("wireUpEventHandler", objRef);
+
+			EventHandlersSet = true;
+		}
+
+		if (!words.Any())
+		{
+			using (StreamReader reader = new StreamReader(await Http.GetStreamAsync("words/words_alpha.txt")))
+			{
+				while (!reader.EndOfStream)
+				{
+					words.Add(await reader.ReadLineAsync());
+				}
+			}
+		}
+
+		// Pick random Wordle if none is choosen
+	}
+
+	private DotNetObjectReference<Index>? objRef;
+
+	[JSInvokable]
+	public async Task HandleKeyPress(string value)
+	{
+		var currentEmptyPlaces = GetCurrentGuessEmptyPlaces();
+
+		if (value.StartsWith("Key") && currentEmptyPlaces > 0)
+		{
+			var letter = value.Remove(0, 3);
+
+			guesses[CurrentGuess][guesses[CurrentGuess].Length - currentEmptyPlaces] = letter.ToUpper()[0];
+		}
+
+		if (value == "Backspace")
+		{
+			guesses[CurrentGuess][(guesses[CurrentGuess].Length - 1) - currentEmptyPlaces] = '\0';
+		}
+
+		if (value == "Enter")
+		{
+			if (currentEmptyPlaces == 0)
+			{
+				var word = new string(guesses[CurrentGuess]).ToLower();
+				if (!words.Contains(word))
+				{
+					await JS.InvokeVoidAsync("toast", "warning", "Word not in list!");
+				}
+				else
+				{
+					if (Wordle.ToLower() == word)
+					{
+						await JS.InvokeVoidAsync("toast", "success", "Success! Congrats");
+					}
+					else
+					{
+						CurrentGuess++;
+					}
+				}
+			}
+			else
+			{
+				await JS.InvokeVoidAsync("toast", "warning", "Not enough letters!");
+			}
+		}
+
+		StateHasChanged();
+	}
+
+	private int GetCurrentGuessEmptyPlaces()
+	{
+		var count = 0;
+
+		for (int i = 0; i < guesses[CurrentGuess].Length; i++)
+		{
+			if (guesses[CurrentGuess][i] == '\0')
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
+	private string GetGamePieceClass(char letter, int position, int guessNumber)
+	{
+		if (guessNumber == CurrentGuess)
+		{
+			if (letter != '\0')
+			{
+				return "active";
+			}
+		}
+
+		if (Wordle[position] == letter)
+		{
+			return "success";
+		}
+
+		if (Wordle.Contains(letter))
+		{
+			return "partial";
+		}
+
+		if (letter != '\0')
+		{
+			return "fail";
+		}
+
+		return string.Empty;
+	}
+}
