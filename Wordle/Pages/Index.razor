@@ -4,7 +4,7 @@
 
 <PageTitle>Index</PageTitle>
 
-<h1>Wordle on Blazor</h1>
+<h1>Wordle in Blazor</h1>
 
 <div class="container align-middle">
 
@@ -13,36 +13,48 @@
 		<div class="d-flex flex-row">
 			@for (int i = 0; i < guesses[guessNumber].Length; i++)
 			{
-				<div class="m-2 text-center d-flex align-items-center game-piece @GetGamePieceClass(guesses[guessNumber][i], i, guessNumber)">
+				<div class="m-1 text-center d-flex align-items-center game-piece @GetGamePieceClass(guesses[guessNumber][i], i, guessNumber)">
 					<p class="w-100 m-0">@(guesses[guessNumber][i] != '\0' ? guesses[guessNumber][i] : "")</p>
 				</div>
 			}
 		</div>
 	}
+
+	<div class="text-center py-4">
+		@if (gameState != GameState.Playing)
+		{
+			if (gameState == GameState.Sucess)
+			{
+				<h2>Congrats you made it in @(CurrentGuess + 1) guesses</h2>
+			}
+			else
+			{
+				<h2>You'll get it next time! @Wordle was a tricky one</h2>
+			}
+
+			<button @onclick="ResetGame">New Word</button>
+		}
+	</div>
+
 </div>
 
 @code {
 	private int CurrentGuess = 0;
 	private int MaxGuessNo = 6;
 
+	private GameState gameState = GameState.Playing;
+
 	private char[][] guesses = new char[0][];
 	private bool EventHandlersSet = false;
 
-	private string Wordle = "SMASH";
+	private string Wordle = "";
 
 	private List<string> words = new List<string>();
 
+	private DotNetObjectReference<Index>? objRef;
+
 	protected override async Task OnInitializedAsync()
 	{
-		if (!guesses.Any())
-		{
-			guesses = new char[MaxGuessNo][];
-			for (int i = 0; i < MaxGuessNo; i++)
-			{
-				guesses[i] = new char[Wordle.Length];
-			}
-		}
-
 		if (!EventHandlersSet)
 		{
 			objRef = DotNetObjectReference.Create(this);
@@ -53,23 +65,52 @@
 
 		if (!words.Any())
 		{
-			using (StreamReader reader = new StreamReader(await Http.GetStreamAsync("words/words_alpha.txt")))
+			using (StreamReader reader = new StreamReader(await Http.GetStreamAsync("words/5-letter-words.txt")))
 			{
+				var newWords = new List<string>();
+
 				while (!reader.EndOfStream)
 				{
-					words.Add(await reader.ReadLineAsync());
+					newWords.Add((await reader.ReadLineAsync()).ToUpper());
 				}
+
+				words = newWords;
 			}
 		}
 
 		// Pick random Wordle if none is choosen
+		if (string.IsNullOrEmpty(Wordle))
+		{
+			ResetGame();
+		}
+
+		await base.OnParametersSetAsync();
 	}
 
-	private DotNetObjectReference<Index>? objRef;
+	public void ResetGame()
+	{
+		var rnd = new Random();
+		Wordle = words.ToArray()[rnd.Next(words.Count() - 1)].ToUpper();
+
+		guesses = new char[MaxGuessNo][];
+		for (int i = 0; i < MaxGuessNo; i++)
+		{
+			guesses[i] = new char[Wordle.Length];
+		}
+
+		CurrentGuess = 0;
+
+		gameState = GameState.Playing;
+	}
 
 	[JSInvokable]
 	public async Task HandleKeyPress(string value)
 	{
+		if (gameState != GameState.Playing)
+		{
+			return;
+		}
+
 		var currentEmptyPlaces = GetCurrentGuessEmptyPlaces();
 
 		if (value.StartsWith("Key") && currentEmptyPlaces > 0)
@@ -88,19 +129,30 @@
 		{
 			if (currentEmptyPlaces == 0)
 			{
-				var word = new string(guesses[CurrentGuess]).ToLower();
-				if (!words.Contains(word))
+				var guess = new string(guesses[CurrentGuess]).ToUpper();
+				if (!words.Contains(guess))
 				{
 					await JS.InvokeVoidAsync("toast", "warning", "Word not in list!");
 				}
 				else
 				{
-					if (Wordle.ToLower() == word)
+					if (Wordle == guess)
 					{
+						// Game end success
 						await JS.InvokeVoidAsync("toast", "success", "Success! Congrats");
+
+						gameState = GameState.Sucess;
+					}
+					else if (CurrentGuess == (MaxGuessNo - 1))
+					{
+						// Game end fail
+						await JS.InvokeVoidAsync("toast", "fail", "Fail!");
+
+						gameState = GameState.Failed;
 					}
 					else
 					{
+						// Next guess
 						CurrentGuess++;
 					}
 				}
@@ -131,7 +183,7 @@
 
 	private string GetGamePieceClass(char letter, int position, int guessNumber)
 	{
-		if (guessNumber == CurrentGuess)
+		if (guessNumber == CurrentGuess && gameState == GameState.Playing)
 		{
 			if (letter != '\0')
 			{
